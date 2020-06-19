@@ -19,7 +19,6 @@
 """
 
 import numpy as np
-import matplotlib.pyplot as plt
 from six.moves import xrange
 
 from pyalgotrade.technical import roc
@@ -78,13 +77,15 @@ class Predicate(object):
     """Base class for event identification. You should subclass this to implement
     the event identification logic."""
 
-    def eventOccurred(self, instrument, bards):
-        """Override (**mandatory**) to determine if an event took place in the last bar (bards[-1]).
+    def eventOccurred(self, instrument, barDS):
+        """
+        Override (**mandatory**) to determine if an event took place in the last bar (barDS[-1]).
 
         :param instrument: Instrument identifier.
-        :type instrument: string.
-        :param bards: The BarDataSeries for the given instrument.
-        :type bards: :class:`pyalgotrade.dataseries.bards.BarDataSeries`.
+        :type instrument: A :class:`pyalgotrade.instrument.Instrument` or a string formatted like
+            QUOTE_SYMBOL/PRICE_CURRENCY.
+        :param barDS: The BarDataSeries for the given instrument.
+        :type barDS: :class:`pyalgotrade.dataseries.bards.BarDataSeries`.
         :rtype: boolean.
         """
         raise NotImplementedError()
@@ -168,9 +169,12 @@ class Profiler(object):
         self.__futureRets[instrument] = nextTs
 
     def __onBars(self, dateTime, bars):
-        for instrument in bars.getInstruments():
+        for bar in bars.getBars():
+            instrument = bar.getInstrument()
+            barDS = self.__feed.getDataSeries(instrument)
+
             self.__addCurrentReturns(instrument)
-            eventOccurred = self.__predicate.eventOccurred(instrument, self.__feed[instrument])
+            eventOccurred = self.__predicate.eventOccurred(instrument, barDS)
             if eventOccurred:
                 event = Event(self.__lookBack, self.__lookForward)
                 self.__events[instrument].append(event)
@@ -201,13 +205,15 @@ class Profiler(object):
             self.__feed = feed
             self.__rets = {}
             self.__futureRets = {}
-            for instrument in feed.getRegisteredInstruments():
+
+            for barDS in feed.getAllDataSeries():
+                instrument = barDS.getInstrument()
                 self.__events.setdefault(instrument, [])
                 self.__futureRets[instrument] = []
                 if useAdjustedCloseForReturns:
-                    ds = feed[instrument].getAdjCloseDataSeries()
+                    ds = barDS.getAdjCloseDataSeries()
                 else:
-                    ds = feed[instrument].getCloseDataSeries()
+                    ds = barDS.getCloseDataSeries()
                 self.__rets[instrument] = roc.RateOfChange(ds, 1)
 
             feed.getNewValuesEvent().subscribe(self.__onBars)
@@ -219,6 +225,8 @@ class Profiler(object):
 
 
 def build_plot(profilerResults):
+    import matplotlib.pyplot as plt
+
     # Calculate each value.
     x = []
     mean = []
@@ -261,6 +269,8 @@ def plot(profilerResults):
     :param profilerResults: The result of the analysis
     :type profilerResults: :class:`Results`.
     """
+
+    import matplotlib.pyplot as plt
 
     build_plot(profilerResults)
     plt.show()

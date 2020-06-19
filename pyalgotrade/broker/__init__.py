@@ -24,6 +24,7 @@ import six
 
 from pyalgotrade import observer
 from pyalgotrade import dispatchprio
+from pyalgotrade.instrument import build_instrument, assert_valid_symbol
 
 
 # This class is used to prevent bugs like the one triggered in testcases.bitstamp_test:TestCase.testRoundingBug.
@@ -33,15 +34,17 @@ from pyalgotrade import dispatchprio
 @six.add_metaclass(abc.ABCMeta)
 class InstrumentTraits(object):
 
-    # Return the floating point value number rounded.
     @abc.abstractmethod
-    def roundQuantity(self, quantity):
+    def getPrecision(self, symbol):
         raise NotImplementedError()
 
-
-class IntegerTraits(InstrumentTraits):
-    def roundQuantity(self, quantity):
-        return int(quantity)
+    def round(self, amount, symbol, roundDown=False):
+        assert_valid_symbol(symbol)
+        precision = self.getPrecision(symbol)
+        if roundDown:
+            factor = 10**self.getPrecision(symbol)
+            amount = int(amount * factor) / float(factor)
+        return round(amount, precision)
 
 
 ######################################################################
@@ -62,14 +65,16 @@ class IntegerTraits(InstrumentTraits):
 # PARTIALLY_FILLED  -> CANCELED
 
 class Order(object):
-    """Base class for orders.
+    """
+    Base class for orders.
 
     :param type_: The order type
     :type type_: :class:`Order.Type`
     :param action: The order action.
     :type action: :class:`Order.Action`
     :param instrument: Instrument identifier.
-    :type instrument: string.
+    :type instrument: A :class:`pyalgotrade.instrument.Instrument` or a string formatted like
+        QUOTE_SYMBOL/PRICE_CURRENCY.
     :param quantity: Order quantity.
     :type quantity: int/float.
 
@@ -105,22 +110,18 @@ class Order(object):
         PARTIALLY_FILLED = 5  # Order has been partially filled.
         FILLED = 6  # Order has been completely filled.
 
-        @classmethod
-        def toString(cls, state):
-            if state == cls.INITIAL:
-                return "INITIAL"
-            elif state == cls.SUBMITTED:
-                return "SUBMITTED"
-            elif state == cls.ACCEPTED:
-                return "ACCEPTED"
-            elif state == cls.CANCELED:
-                return "CANCELED"
-            elif state == cls.PARTIALLY_FILLED:
-                return "PARTIALLY_FILLED"
-            elif state == cls.FILLED:
-                return "FILLED"
-            else:
-                raise Exception("Invalid state")
+        @staticmethod
+        def toString(state):
+            ret = {
+                Order.State.INITIAL: "INITIAL",
+                Order.State.SUBMITTED: "SUBMITTED",
+                Order.State.ACCEPTED: "ACCEPTED",
+                Order.State.CANCELED: "CANCELED",
+                Order.State.PARTIALLY_FILLED: "PARTIALLY_FILLED",
+                Order.State.FILLED: "FILLED"
+            }.get(state)
+            assert ret is not None, "Invalid state %s" % state
+            return ret
 
     class Type(object):
         MARKET = 1
@@ -139,12 +140,12 @@ class Order(object):
 
     def __init__(self, type_, action, instrument, quantity, instrumentTraits):
         if quantity is not None and quantity <= 0:
-            raise Exception("Invalid quantity")
+            raise Exception("Invalid quantity %s" % quantity)
 
         self.__id = None
         self.__type = type_
         self.__action = action
-        self.__instrument = instrument
+        self.__instrument = build_instrument(instrument)
         self.__quantity = quantity
         self.__instrumentTraits = instrumentTraits
         self.__filled = 0
@@ -173,6 +174,18 @@ class Order(object):
         assert quantity > 0, "Invalid quantity"
         self.__quantity = quantity
 
+    def _roundSymbol(self, amount):
+        return self.__instrumentTraits.round(amount, self.__instrument.symbol)
+
+    def _roundPrice(self, price):
+        return self.__instrumentTraits.round(price, self.__instrument.priceCurrency)
+
+    def getInstrument(self):
+        """
+        Returns the instrument identifier
+        """
+        return self.__instrument
+
     def getInstrumentTraits(self):
         return self.__instrumentTraits
 
@@ -187,7 +200,8 @@ class Order(object):
         return self.__id
 
     def getType(self):
-        """Returns the order type. Valid order types are:
+        """
+        Returns the order type. Valid order types are:
 
          * Order.Type.MARKET
          * Order.Type.LIMIT
@@ -197,7 +211,9 @@ class Order(object):
         return self.__type
 
     def getSubmitDateTime(self):
-        """Returns the datetime when the order was submitted."""
+        """
+        Returns the datetime when the order was submitted.
+        """
         return self.__submitDateTime
 
     def setSubmitted(self, orderId, dateTime):
@@ -206,7 +222,8 @@ class Order(object):
         self.__submitDateTime = dateTime
 
     def getAction(self):
-        """Returns the order action. Valid order actions are:
+        """
+        Returns the order action. Valid order actions are:
 
          * Order.Action.BUY
          * Order.Action.BUY_TO_COVER
@@ -216,7 +233,8 @@ class Order(object):
         return self.__action
 
     def getState(self):
-        """Returns the order state. Valid order states are:
+        """
+        Returns the order state. Valid order states are:
 
          * Order.State.INITIAL (the initial state).
          * Order.State.SUBMITTED
@@ -228,62 +246,83 @@ class Order(object):
         return self.__state
 
     def isActive(self):
-        """Returns True if the order is active."""
+        """
+        Returns True if the order is active.
+        """
         return self.__state not in [Order.State.CANCELED, Order.State.FILLED]
 
     def isInitial(self):
-        """Returns True if the order state is Order.State.INITIAL."""
+        """
+        Returns True if the order state is Order.State.INITIAL.
+        """
         return self.__state == Order.State.INITIAL
 
     def isSubmitted(self):
-        """Returns True if the order state is Order.State.SUBMITTED."""
+        """
+        Returns True if the order state is Order.State.SUBMITTED.
+        """
         return self.__state == Order.State.SUBMITTED
 
     def isAccepted(self):
-        """Returns True if the order state is Order.State.ACCEPTED."""
+        """
+        Returns True if the order state is Order.State.ACCEPTED.
+        """
         return self.__state == Order.State.ACCEPTED
 
     def isCanceled(self):
-        """Returns True if the order state is Order.State.CANCELED."""
+        """
+        Returns True if the order state is Order.State.CANCELED.
+        """
         return self.__state == Order.State.CANCELED
 
     def isPartiallyFilled(self):
-        """Returns True if the order state is Order.State.PARTIALLY_FILLED."""
+        """
+        Returns True if the order state is Order.State.PARTIALLY_FILLED.
+        """
         return self.__state == Order.State.PARTIALLY_FILLED
 
     def isFilled(self):
-        """Returns True if the order state is Order.State.FILLED."""
+        """
+        Returns True if the order state is Order.State.FILLED.
+        """
         return self.__state == Order.State.FILLED
 
-    def getInstrument(self):
-        """Returns the instrument identifier."""
-        return self.__instrument
-
     def getQuantity(self):
-        """Returns the quantity."""
+        """
+        Returns the quantity.
+        """
         return self.__quantity
 
     def getFilled(self):
-        """Returns the number of shares that have been executed."""
+        """
+        Returns the number of shares that have been executed.
+        """
         return self.__filled
 
     def getRemaining(self):
-        """Returns the number of shares still outstanding."""
-        return self.__instrumentTraits.roundQuantity(self.__quantity - self.__filled)
+        """
+        Returns the number of shares still outstanding.
+        """
+        return self._roundSymbol(self.__quantity - self.__filled)
 
     def getAvgFillPrice(self):
-        """Returns the average price of the shares that have been executed, or None if nothing has been filled."""
+        """
+        Returns the average price of the shares that have been executed, or None if nothing has been filled.
+        """
         return self.__avgFillPrice
 
     def getCommissions(self):
         return self.__commissions
 
     def getGoodTillCanceled(self):
-        """Returns True if the order is good till canceled."""
+        """
+        Returns True if the order is good till canceled.
+        """
         return self.__goodTillCanceled
 
     def setGoodTillCanceled(self, goodTillCanceled):
-        """Sets if the order should be good till canceled.
+        """
+        Sets if the order should be good till canceled.
         Orders that are not filled by the time the session closes will be will be automatically canceled
         if they were not set as good till canceled
 
@@ -297,11 +336,14 @@ class Order(object):
         self.__goodTillCanceled = goodTillCanceled
 
     def getAllOrNone(self):
-        """Returns True if the order should be completely filled or else canceled."""
+        """
+        Returns True if the order should be completely filled or else canceled.
+        """
         return self.__allOrNone
 
     def setAllOrNone(self, allOrNone):
-        """Sets the All-Or-None property for this order.
+        """
+        Sets the All-Or-None property for this order.
 
         :param allOrNone: True if the order should be completely filled.
         :type allOrNone: boolean.
@@ -314,16 +356,21 @@ class Order(object):
 
     def addExecutionInfo(self, orderExecutionInfo):
         if orderExecutionInfo.getQuantity() > self.getRemaining():
-            raise Exception("Invalid fill size. %s remaining and %s filled" % (self.getRemaining(), orderExecutionInfo.getQuantity()))
+            raise Exception("Invalid fill size. %s remaining and %s filled" % (
+                self.getRemaining(), orderExecutionInfo.getQuantity())
+            )
 
         if self.__avgFillPrice is None:
             self.__avgFillPrice = orderExecutionInfo.getPrice()
         else:
-            self.__avgFillPrice = (self.__avgFillPrice * self.__filled + orderExecutionInfo.getPrice() * orderExecutionInfo.getQuantity()) / float(self.__filled + orderExecutionInfo.getQuantity())
+            prev_fill = self.__avgFillPrice * self.__filled
+            curr_fill = orderExecutionInfo.getPrice() * orderExecutionInfo.getQuantity()
+            total_quantity = self.__filled + orderExecutionInfo.getQuantity()
+            self.__avgFillPrice = self._roundPrice((prev_fill + curr_fill) / float(total_quantity))
 
         self.__executionInfo = orderExecutionInfo
-        self.__filled = self.getInstrumentTraits().roundQuantity(self.__filled + orderExecutionInfo.getQuantity())
-        self.__commissions += orderExecutionInfo.getCommission()
+        self.__filled = self._roundSymbol(self.__filled + orderExecutionInfo.getQuantity())
+        self.__commissions = self._roundPrice(self.__commissions + orderExecutionInfo.getCommission())
 
         if self.getRemaining() == 0:
             self.switchState(Order.State.FILLED)
@@ -334,7 +381,9 @@ class Order(object):
     def switchState(self, newState):
         validTransitions = Order.VALID_TRANSITIONS.get(self.__state, [])
         if newState not in validTransitions:
-            raise Exception("Invalid order state transition from %s to %s" % (Order.State.toString(self.__state), Order.State.toString(newState)))
+            raise Exception("Invalid order state transition from %s to %s" % (
+                Order.State.toString(self.__state), Order.State.toString(newState)
+            ))
         else:
             self.__state = newState
 
@@ -342,24 +391,30 @@ class Order(object):
         self.__state = newState
 
     def getExecutionInfo(self):
-        """Returns the last execution information for this order, or None if nothing has been filled so far.
+        """
+        Returns the last execution information for this order, or None if nothing has been filled so far.
         This will be different every time an order, or part of it, gets filled.
 
         :rtype: :class:`OrderExecutionInfo`.
         """
         return self.__executionInfo
 
-    # Returns True if this is a BUY or BUY_TO_COVER order.
     def isBuy(self):
+        """
+        Returns True if this is a BUY or BUY_TO_COVER order.
+        """
         return self.__action in [Order.Action.BUY, Order.Action.BUY_TO_COVER]
 
-    # Returns True if this is a SELL or SELL_SHORT order.
     def isSell(self):
+        """
+        Returns True if this is a SELL or SELL_SHORT order.
+        """
         return self.__action in [Order.Action.SELL, Order.Action.SELL_SHORT]
 
 
 class MarketOrder(Order):
-    """Base class for market orders.
+    """
+    Base class for market orders.
 
     .. note::
 
@@ -367,16 +422,21 @@ class MarketOrder(Order):
     """
 
     def __init__(self, action, instrument, quantity, onClose, instrumentTraits):
-        super(MarketOrder, self).__init__(Order.Type.MARKET, action, instrument, quantity, instrumentTraits)
+        super(MarketOrder, self).__init__(
+            Order.Type.MARKET, action, instrument, quantity, instrumentTraits
+        )
         self.__onClose = onClose
 
     def getFillOnClose(self):
-        """Returns True if the order should be filled as close to the closing price as possible (Market-On-Close order)."""
+        """
+        Returns True if the order should be filled as close to the closing price as possible (Market-On-Close order).
+        """
         return self.__onClose
 
 
 class LimitOrder(Order):
-    """Base class for limit orders.
+    """
+    Base class for limit orders.
 
     .. note::
 
@@ -384,7 +444,9 @@ class LimitOrder(Order):
     """
 
     def __init__(self, action, instrument, limitPrice, quantity, instrumentTraits):
-        super(LimitOrder, self).__init__(Order.Type.LIMIT, action, instrument, quantity, instrumentTraits)
+        super(LimitOrder, self).__init__(
+            Order.Type.LIMIT, action, instrument, quantity, instrumentTraits
+        )
         self.__limitPrice = limitPrice
 
     def getLimitPrice(self):
@@ -393,7 +455,8 @@ class LimitOrder(Order):
 
 
 class StopOrder(Order):
-    """Base class for stop orders.
+    """
+    Base class for stop orders.
 
     .. note::
 
@@ -401,16 +464,21 @@ class StopOrder(Order):
     """
 
     def __init__(self, action, instrument, stopPrice, quantity, instrumentTraits):
-        super(StopOrder, self).__init__(Order.Type.STOP, action, instrument, quantity, instrumentTraits)
+        super(StopOrder, self).__init__(
+            Order.Type.STOP, action, instrument, quantity, instrumentTraits
+        )
         self.__stopPrice = stopPrice
 
     def getStopPrice(self):
-        """Returns the stop price."""
+        """
+        Returns the stop price.
+        """
         return self.__stopPrice
 
 
 class StopLimitOrder(Order):
-    """Base class for stop limit orders.
+    """
+    Base class for stop limit orders.
 
     .. note::
 
@@ -418,21 +486,29 @@ class StopLimitOrder(Order):
     """
 
     def __init__(self, action, instrument, stopPrice, limitPrice, quantity, instrumentTraits):
-        super(StopLimitOrder, self).__init__(Order.Type.STOP_LIMIT, action, instrument, quantity, instrumentTraits)
+        super(StopLimitOrder, self).__init__(
+            Order.Type.STOP_LIMIT, action, instrument, quantity, instrumentTraits
+        )
         self.__stopPrice = stopPrice
         self.__limitPrice = limitPrice
 
     def getStopPrice(self):
-        """Returns the stop price."""
+        """
+        Returns the stop price.
+        """
         return self.__stopPrice
 
     def getLimitPrice(self):
-        """Returns the limit price."""
+        """
+        Returns the limit price.
+        """
         return self.__limitPrice
 
 
 class OrderExecutionInfo(object):
-    """Execution information for an order."""
+    """
+    Execution information for an order.
+    """
     def __init__(self, price, quantity, commission, dateTime):
         self.__price = price
         self.__quantity = quantity
@@ -440,22 +516,32 @@ class OrderExecutionInfo(object):
         self.__dateTime = dateTime
 
     def __str__(self):
-        return "%s - Price: %s - Amount: %s - Fee: %s" % (self.__dateTime, self.__price, self.__quantity, self.__commission)
+        return "%s - Price: %s - Amount: %s - Fee: %s" % (
+            self.__dateTime, self.__price, self.__quantity, self.__commission
+        )
 
     def getPrice(self):
-        """Returns the fill price."""
+        """
+        Returns the fill price.
+        """
         return self.__price
 
     def getQuantity(self):
-        """Returns the quantity."""
+        """
+        Returns the quantity.
+        """
         return self.__quantity
 
     def getCommission(self):
-        """Returns the commission applied."""
+        """
+        Returns the commission applied.
+        """
         return self.__commission
 
     def getDateTime(self):
-        """Returns the :class:`datatime.datetime` when the order was executed."""
+        """
+        Returns the :class:`datatime.datetime` when the order was executed.
+        """
         return self.__dateTime
 
 
@@ -466,6 +552,18 @@ class OrderEvent(object):
         CANCELED = 3  # Order has been canceled.
         PARTIALLY_FILLED = 4  # Order has been partially filled.
         FILLED = 5  # Order has been completely filled.
+
+        @staticmethod
+        def toString(type):
+            ret = {
+                OrderEvent.Type.SUBMITTED: "SUBMITTED",
+                OrderEvent.Type.ACCEPTED: "ACCEPTED",
+                OrderEvent.Type.CANCELED: "CANCELED",
+                OrderEvent.Type.PARTIALLY_FILLED: "PARTIALLY_FILLED",
+                OrderEvent.Type.FILLED: "FILLED",
+            }.get(type)
+            assert ret is not None, "Invalid type %s" % type
+            return ret
 
     def __init__(self, order, eventyType, eventInfo):
         self.__order = order
@@ -486,12 +584,30 @@ class OrderEvent(object):
     def getEventInfo(self):
         return self.__eventInfo
 
+    def __str__(self):
+        eventType = OrderEvent.Type.toString(self.__eventType).lower()
+        action = {
+            Order.Action.BUY: "Buy",
+            Order.Action.BUY_TO_COVER: "Buy",
+            Order.Action.SELL: "Sell",
+            Order.Action.SELL_SHORT: "Sell",
+        }.get(self.__order.getAction())
+
+        ret = "%s order %s was %s" % (action, self.__order.getId(), eventType)
+        if self.__eventType in (OrderEvent.Type.PARTIALLY_FILLED, OrderEvent.Type.FILLED):
+            ret += " %s @ %s (fee %s)" % (
+                self.__eventInfo.getQuantity(), self.__eventInfo.getPrice(), self.__eventInfo.getCommission()
+            )
+
+        return ret
+
 
 ######################################################################
 # Base broker class
 @six.add_metaclass(abc.ABCMeta)
 class Broker(observer.Subject):
-    """Base class for brokers.
+    """
+    Base class for brokers.
 
     .. note::
 
@@ -515,41 +631,38 @@ class Broker(observer.Subject):
         return self.__orderEvent
 
     @abc.abstractmethod
-    def getInstrumentTraits(self, instrument):
+    def getInstrumentTraits(self):
         raise NotImplementedError()
 
     @abc.abstractmethod
-    def getCash(self, includeShort=True):
+    def getBalances(self):
         """
-        Returns the available cash.
-
-        :param includeShort: Include cash from short positions.
-        :type includeShort: boolean.
+        Returns a dictionary that maps an instrument/currency/etc to the account's balance.
         """
         raise NotImplementedError()
 
-    @abc.abstractmethod
-    def getShares(self, instrument):
-        """Returns the number of shares for an instrument."""
-        raise NotImplementedError()
-
-    @abc.abstractmethod
-    def getPositions(self):
-        """Returns a dictionary that maps instruments to shares."""
-        raise NotImplementedError()
+    def getBalance(self, symbol):
+        """
+        Returns the balance for a given symbol.
+        """
+        assert_valid_symbol(symbol)
+        return self.getBalances().get(symbol, 0)
 
     @abc.abstractmethod
     def getActiveOrders(self, instrument=None):
-        """Returns a sequence with the orders that are still active.
+        """
+        Returns a sequence with the orders that are still active.
 
         :param instrument: An optional instrument identifier to return only the active orders for the given instrument.
-        :type instrument: string.
+        :type instrument: A :class:`pyalgotrade.instrument.Instrument` or a string formatted like
+            QUOTE_SYMBOL/PRICE_CURRENCY.
         """
         raise NotImplementedError()
 
     @abc.abstractmethod
     def submitOrder(self, order):
-        """Submits an order.
+        """
+        Submits an order.
 
         :param order: The order to submit.
         :type order: :class:`Order`.
@@ -562,18 +675,21 @@ class Broker(observer.Subject):
 
     @abc.abstractmethod
     def createMarketOrder(self, action, instrument, quantity, onClose=False):
-        """Creates a Market order.
+        """
+        Creates a Market order.
         A market order is an order to buy or sell a stock at the best available price.
-        Generally, this type of order will be executed immediately. However, the price at which a market order will be executed
-        is not guaranteed.
+        Generally, this type of order will be executed immediately. However, the price at which a market order will be
+        executed is not guaranteed.
 
         :param action: The order action.
         :type action: Order.Action.BUY, or Order.Action.BUY_TO_COVER, or Order.Action.SELL or Order.Action.SELL_SHORT.
         :param instrument: Instrument identifier.
-        :type instrument: string.
+        :type instrument: A :class:`pyalgotrade.instrument.Instrument` or a string formatted like
+            QUOTE_SYMBOL/PRICE_CURRENCY.
         :param quantity: Order quantity.
         :type quantity: int/float.
-        :param onClose: True if the order should be filled as close to the closing price as possible (Market-On-Close order). Default is False.
+        :param onClose: True if the order should be filled as close to the closing price as possible (Market-On-Close
+                        order). Default is False.
         :type onClose: boolean.
         :rtype: A :class:`MarketOrder` subclass.
         """
@@ -583,13 +699,14 @@ class Broker(observer.Subject):
     def createLimitOrder(self, action, instrument, limitPrice, quantity):
         """Creates a Limit order.
         A limit order is an order to buy or sell a stock at a specific price or better.
-        A buy limit order can only be executed at the limit price or lower, and a sell limit order can only be executed at the
-        limit price or higher.
+        A buy limit order can only be executed at the limit price or lower, and a sell limit order can only be executed
+        at the limit price or higher.
 
         :param action: The order action.
         :type action: Order.Action.BUY, or Order.Action.BUY_TO_COVER, or Order.Action.SELL or Order.Action.SELL_SHORT.
         :param instrument: Instrument identifier.
-        :type instrument: string.
+        :type instrument: A :class:`pyalgotrade.instrument.Instrument` or a string formatted like
+            QUOTE_SYMBOL/PRICE_CURRENCY.
         :param limitPrice: The order price.
         :type limitPrice: float
         :param quantity: Order quantity.
@@ -600,19 +717,21 @@ class Broker(observer.Subject):
 
     @abc.abstractmethod
     def createStopOrder(self, action, instrument, stopPrice, quantity):
-        """Creates a Stop order.
-        A stop order, also referred to as a stop-loss order, is an order to buy or sell a stock once the price of the stock
-        reaches a specified price, known as the stop price.
+        """
+        Creates a Stop order.
+        A stop order, also referred to as a stop-loss order, is an order to buy or sell a stock once the price of the
+        stock reaches a specified price, known as the stop price.
         When the stop price is reached, a stop order becomes a market order.
-        A buy stop order is entered at a stop price above the current market price. Investors generally use a buy stop order
-        to limit a loss or to protect a profit on a stock that they have sold short.
-        A sell stop order is entered at a stop price below the current market price. Investors generally use a sell stop order
-        to limit a loss or to protect a profit on a stock that they own.
+        A buy stop order is entered at a stop price above the current market price. Investors generally use a buy stop
+        order to limit a loss or to protect a profit on a stock that they have sold short.
+        A sell stop order is entered at a stop price below the current market price. Investors generally use a sell
+        stop order to limit a loss or to protect a profit on a stock that they own.
 
         :param action: The order action.
         :type action: Order.Action.BUY, or Order.Action.BUY_TO_COVER, or Order.Action.SELL or Order.Action.SELL_SHORT.
         :param instrument: Instrument identifier.
-        :type instrument: string.
+        :type instrument: A :class:`pyalgotrade.instrument.Instrument` or a string formatted like
+            QUOTE_SYMBOL/PRICE_CURRENCY.
         :param stopPrice: The trigger price.
         :type stopPrice: float
         :param quantity: Order quantity.
@@ -623,15 +742,19 @@ class Broker(observer.Subject):
 
     @abc.abstractmethod
     def createStopLimitOrder(self, action, instrument, stopPrice, limitPrice, quantity):
-        """Creates a Stop-Limit order.
-        A stop-limit order is an order to buy or sell a stock that combines the features of a stop order and a limit order.
-        Once the stop price is reached, a stop-limit order becomes a limit order that will be executed at a specified price
-        (or better). The benefit of a stop-limit order is that the investor can control the price at which the order can be executed.
+        """
+        Creates a Stop-Limit order.
+        A stop-limit order is an order to buy or sell a stock that combines the features of a stop order and a limit
+        order.
+        Once the stop price is reached, a stop-limit order becomes a limit order that will be executed at a specified
+        price (or better). The benefit of a stop-limit order is that the investor can control the price at which the
+        order can be executed.
 
         :param action: The order action.
         :type action: Order.Action.BUY, or Order.Action.BUY_TO_COVER, or Order.Action.SELL or Order.Action.SELL_SHORT.
         :param instrument: Instrument identifier.
-        :type instrument: string.
+        :type instrument: A :class:`pyalgotrade.instrument.Instrument` or a string formatted like
+            QUOTE_SYMBOL/PRICE_CURRENCY.
         :param stopPrice: The trigger price.
         :type stopPrice: float
         :param limitPrice: The price for the limit order.
@@ -644,7 +767,8 @@ class Broker(observer.Subject):
 
     @abc.abstractmethod
     def cancelOrder(self, order):
-        """Requests an order to be canceled. If the order is filled an Exception is raised.
+        """
+        Requests an order to be canceled. If the order is filled an Exception is raised.
 
         :param order: The order to cancel.
         :type order: :class:`Order`.

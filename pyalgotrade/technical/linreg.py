@@ -94,7 +94,7 @@ class LeastSquaresRegression(technical.EventBasedFilter):
 class SlopeEventWindow(technical.EventWindow):
     def __init__(self, windowSize):
         super(SlopeEventWindow, self).__init__(windowSize)
-        self.__x = np.asarray(range(windowSize))
+        self.__x = np.arange(windowSize)
 
     def getValue(self):
         ret = None
@@ -140,11 +140,13 @@ class TrendEventWindow(SlopeEventWindow):
                 ret = True
             elif ret < self.__negativeThreshold:
                 ret = False
-            else:  # Between negative and postive thresholds.
+            else:  # Between negative and positive thresholds.
                 ret = None
         return ret
 
 
 class Trend(technical.EventBasedFilter):
-    def __init__(self, dataSeries, trendDays, positiveThreshold=0, negativeThreshold=0, maxLen=None):
-        super(Trend, self).__init__(dataSeries, TrendEventWindow(trendDays, positiveThreshold, negativeThreshold), maxLen)
+    def __init__(self, dataSeries, windowSize, positiveThreshold=0, negativeThreshold=0, maxLen=None):
+        super(Trend, self).__init__(
+            dataSeries, TrendEventWindow(windowSize, positiveThreshold, negativeThreshold), maxLen
+        )

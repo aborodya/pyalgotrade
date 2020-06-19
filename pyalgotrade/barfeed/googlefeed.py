@@ -20,12 +20,13 @@
 .. moduleauthor:: Maciej Żok <maciek.zok@gmail.com>
 """
 
+import datetime
+
 from pyalgotrade.barfeed import csvfeed
 from pyalgotrade.barfeed import common
 from pyalgotrade.utils import dt
 from pyalgotrade import bar
-
-import datetime
+from pyalgotrade.instrument import build_instrument
 
 
 ######################################################################
@@ -56,7 +57,8 @@ def parse_date(date):
 
 
 class RowParser(csvfeed.RowParser):
-    def __init__(self, dailyBarTime, frequency, timezone=None, sanitize=False):
+    def __init__(self, instrument, dailyBarTime, frequency, timezone=None, sanitize=False):
+        self.__instrument = build_instrument(instrument)
         self.__dailyBarTime = dailyBarTime
         self.__frequency = frequency
         self.__timezone = timezone
@@ -71,6 +73,9 @@ class RowParser(csvfeed.RowParser):
         if self.__timezone:
             ret = dt.localize(ret, self.__timezone)
         return ret
+
+    def getInstrument(self):
+        return self.__instrument
 
     def getFieldNames(self):
         # It is expected for the first row to have the field names.
@@ -91,8 +96,7 @@ class RowParser(csvfeed.RowParser):
         if self.__sanitize:
             open_, high, low, close = common.sanitize_ohlc(open_, high, low, close)
 
-        return bar.BasicBar(dateTime, open_, high, low, close, volume,
-                            adjClose, self.__frequency)
+        return bar.BasicBar(self.__instrument, dateTime, open_, high, low, close, volume, adjClose, self.__frequency)
 
 
 class Feed(csvfeed.BarFeed):
@@ -134,7 +138,8 @@ class Feed(csvfeed.BarFeed):
         The instrument gets registered in the bar feed.
 
         :param instrument: Instrument identifier.
-        :type instrument: string.
+        :type instrument: A :class:`pyalgotrade.instrument.Instrument` or a string formatted like
+            QUOTE_SYMBOL/PRICE_CURRENCY.
         :param path: The path to the CSV file.
         :type path: string.
         :param timezone: The timezone to use to localize bars. Check :mod:`pyalgotrade.marketsession`.
@@ -146,5 +151,6 @@ class Feed(csvfeed.BarFeed):
         if timezone is None:
             timezone = self.__timezone
 
-        rowParser = RowParser(self.getDailyBarTime(), self.getFrequency(), timezone, self.__sanitizeBars)
-        super(Feed, self).addBarsFromCSV(instrument, path, rowParser, skipMalformedBars=skipMalformedBars)
+        instrument = build_instrument(instrument)
+        rowParser = RowParser(instrument, self.getDailyBarTime(), self.getFrequency(), timezone, self.__sanitizeBars)
+        super(Feed, self).addBarsFromCSV(path, rowParser, skipMalformedBars=skipMalformedBars)

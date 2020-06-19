@@ -27,12 +27,12 @@ from pyalgotrade.barfeed import yahoofeed
 from pyalgotrade import plotter
 
 sys.path.append("samples")
-import sma_crossover
+import sma_crossover  # noqa: E402
 
 
 class PlotterTestCase(common.TestCase):
     def testDownloadAndParseDaily(self):
-        instrument = "orcl"
+        instrument = "orcl/USD"
         barFeed = yahoofeed.Feed()
         barFeed.addBarsFromCSV(instrument, common.get_data_file_path("orcl-2000-yahoofinance.csv"))
         strat = sma_crossover.SMACrossOver(barFeed, instrument, 20)
@@ -44,4 +44,4 @@ class PlotterTestCase(common.TestCase):
             png = os.path.join(tmpPath, "plotter_test.png")
             plt.savePlot(png)
             # Check that file size looks ok.
-            self.assertGreater(os.stat(png).st_size, 45000)
+            self.assertGreater(os.stat(png).st_size, 44000)

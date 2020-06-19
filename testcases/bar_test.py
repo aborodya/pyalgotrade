@@ -27,48 +27,53 @@ from . import common
 from pyalgotrade import bar
 
 
+QUOTE_SYMBOL = "ORCL"
+PRICE_CURRENCY = "USD"
+INSTRUMENT = "%s/%s" % (QUOTE_SYMBOL, PRICE_CURRENCY)
+
+
 class BasicBarTestCase(common.TestCase):
     def testInvalidConstruction(self):
         with self.assertRaises(Exception):
-            bar.BasicBar(datetime.datetime.now(), 2, 1, 1, 1, 1, 1, bar.Frequency.DAY)
+            bar.BasicBar(INSTRUMENT, datetime.datetime.now(), 2, 1, 1, 1, 1, 1, bar.Frequency.DAY)
         with self.assertRaises(Exception):
-            bar.BasicBar(datetime.datetime.now(), 1, 1, 1, 2, 1, 1, bar.Frequency.DAY)
+            bar.BasicBar(INSTRUMENT, datetime.datetime.now(), 1, 1, 1, 2, 1, 1, bar.Frequency.DAY)
         with self.assertRaises(Exception):
-            bar.BasicBar(datetime.datetime.now(), 1, 2, 1.5, 1, 1, 1, bar.Frequency.DAY)
+            bar.BasicBar(INSTRUMENT, datetime.datetime.now(), 1, 2, 1.5, 1, 1, 1, bar.Frequency.DAY)
         with self.assertRaises(Exception):
-            bar.BasicBar(datetime.datetime.now(), 2, 2, 1.5, 1, 1, 1, bar.Frequency.DAY)
+            bar.BasicBar(INSTRUMENT, datetime.datetime.now(), 2, 2, 1.5, 1, 1, 1, bar.Frequency.DAY)
         with self.assertRaises(Exception):
-            bar.BasicBar(datetime.datetime.now(), 1, 1, 1.5, 1, 1, 1, bar.Frequency.DAY)
+            bar.BasicBar(INSTRUMENT, datetime.datetime.now(), 1, 1, 1.5, 1, 1, 1, bar.Frequency.DAY)
 
     def testTypicalPrice(self):
-        b = bar.BasicBar(datetime.datetime.now(), 2, 3, 1, 2.1, 10, 5, bar.Frequency.DAY)
-        self.assertEquals(b.getTypicalPrice(), (3 + 1 + 2.1) / 3)
+        b = bar.BasicBar(INSTRUMENT, datetime.datetime.now(), 2, 3, 1, 2.1, 10, 5, bar.Frequency.DAY)
+        self.assertEqual(b.getTypicalPrice(), (3 + 1 + 2.1) / 3)
 
     def testGetPrice(self):
-        b = bar.BasicBar(datetime.datetime.now(), 2, 3, 1, 2.1, 10, 5, bar.Frequency.DAY)
-        self.assertEquals(b.getPrice(), b.getClose())
+        b = bar.BasicBar(INSTRUMENT, datetime.datetime.now(), 2, 3, 1, 2.1, 10, 5, bar.Frequency.DAY)
+        self.assertEqual(b.getPrice(), b.getClose())
         b.setUseAdjustedValue(True)
-        self.assertEquals(b.getPrice(), b.getAdjClose())
+        self.assertEqual(b.getPrice(), b.getAdjClose())
 
     def testPickle(self):
-        b1 = bar.BasicBar(datetime.datetime.now(), 2, 3, 1, 2.1, 10, 5, bar.Frequency.DAY)
+        b1 = bar.BasicBar(INSTRUMENT, datetime.datetime.now(), 2, 3, 1, 2.1, 10, 5, bar.Frequency.DAY)
         b2 = cPickle.loads(cPickle.dumps(b1))
-        self.assertEquals(b1.getDateTime(), b2.getDateTime())
-        self.assertEquals(b1.getOpen(), b2.getOpen())
-        self.assertEquals(b1.getHigh(), b2.getHigh())
-        self.assertEquals(b1.getLow(), b2.getLow())
-        self.assertEquals(b1.getClose(), b2.getClose())
-        self.assertEquals(b1.getVolume(), b2.getVolume())
-        self.assertEquals(b1.getAdjClose(), b2.getAdjClose())
-        self.assertEquals(b1.getFrequency(), b2.getFrequency())
-        self.assertEquals(b1.getPrice(), b2.getPrice())
-        self.assertEquals(b1.getOpen(True), b2.getOpen(True))
-        self.assertEquals(b1.getHigh(True), b2.getHigh(True))
-        self.assertEquals(b1.getLow(True), b2.getLow(True))
-        self.assertEquals(b1.getClose(True), b2.getClose(True))
+        self.assertEqual(b1.getDateTime(), b2.getDateTime())
+        self.assertEqual(b1.getOpen(), b2.getOpen())
+        self.assertEqual(b1.getHigh(), b2.getHigh())
+        self.assertEqual(b1.getLow(), b2.getLow())
+        self.assertEqual(b1.getClose(), b2.getClose())
+        self.assertEqual(b1.getVolume(), b2.getVolume())
+        self.assertEqual(b1.getAdjClose(), b2.getAdjClose())
+        self.assertEqual(b1.getFrequency(), b2.getFrequency())
+        self.assertEqual(b1.getPrice(), b2.getPrice())
+        self.assertEqual(b1.getOpen(True), b2.getOpen(True))
+        self.assertEqual(b1.getHigh(True), b2.getHigh(True))
+        self.assertEqual(b1.getLow(True), b2.getLow(True))
+        self.assertEqual(b1.getClose(True), b2.getClose(True))
 
     def testNoAdjClose(self):
-        b = bar.BasicBar(datetime.datetime.now(), 2, 3, 1, 2.1, 10, None, bar.Frequency.DAY)
+        b = bar.BasicBar(INSTRUMENT, datetime.datetime.now(), 2, 3, 1, 2.1, 10, None, bar.Frequency.DAY)
         with self.assertRaises(Exception):
             b.setUseAdjustedValue(True)
         with self.assertRaises(Exception):
@@ -87,21 +92,45 @@ class BarsTestCase(common.TestCase):
             bar.Bars({})
 
     def testInvalidDateTimes(self):
-        b1 = bar.BasicBar(datetime.datetime.now(), 2, 3, 1, 2.1, 10, 5, bar.Frequency.DAY)
-        b2 = bar.BasicBar(datetime.datetime.now() + datetime.timedelta(days=1), 2, 3, 1, 2.1, 10, 5, bar.Frequency.DAY)
-        with self.assertRaises(Exception):
-            bar.Bars({"a": b1, "b": b2})
+        b1 = bar.BasicBar(INSTRUMENT, datetime.datetime.now(), 2, 3, 1, 2.1, 10, 5, bar.Frequency.DAY)
+        b2 = bar.BasicBar(
+            INSTRUMENT, datetime.datetime.now() + datetime.timedelta(days=1),
+            2, 3, 1, 2.1, 10, 5, bar.Frequency.DAY
+        )
+        with self.assertRaisesRegexp(Exception, "Bar data times are not in sync"):
+            bar.Bars([b1, b2])
 
-    def testBasic(self):
+    def testBasicOperations(self):
         dt = datetime.datetime.now()
-        b1 = bar.BasicBar(dt, 1, 1, 1, 1, 10, 1, bar.Frequency.DAY)
-        b2 = bar.BasicBar(dt, 2, 2, 2, 2, 10, 2, bar.Frequency.DAY)
-        bars = bar.Bars({"a": b1, "b": b2})
-        self.assertEquals(bars["a"].getClose(), 1)
-        self.assertEquals(bars["b"].getClose(), 2)
-        self.assertTrue("a" in bars)
-        self.assertEquals(bars.items(), [("a", b1), ("b", b2)])
-        self.assertEquals(bars.keys(), ["a", "b"])
-        self.assertEquals(bars.getInstruments(), ["a", "b"])
-        self.assertEquals(bars.getDateTime(), dt)
-        self.assertEquals(bars.getBar("a").getClose(), 1)
+        b1 = bar.BasicBar("a/usd", dt, 1, 1, 1, 1, 10, 1, bar.Frequency.DAY)
+        b2 = bar.BasicBar("b/usd", dt, 2, 2, 2, 2, 10, 2, bar.Frequency.DAY)
+        bars = bar.Bars([b1, b2])
+
+        self.assertEqual(bars["a/usd"].getClose(), 1)
+        self.assertEqual(bars["b/usd"].getClose(), 2)
+        self.assertTrue("a/usd" in bars)
+        self.assertEqual(bars.getInstruments(), ["a/usd", "b/usd"])
+        self.assertEqual(bars.getDateTime(), dt)
+        self.assertEqual(bars.getBar("a/usd").getClose(), 1)
+
+        with self.assertRaises(KeyError):
+            bars["c/usd"]
+
+    def testDuplicateInstruments(self):
+        dt = datetime.datetime.now()
+        b1 = bar.BasicBar(INSTRUMENT, dt, 1, 1, 1, 1, 10, 1, bar.Frequency.DAY)
+        b2 = bar.BasicBar(INSTRUMENT, dt, 2, 2, 2, 2, 10, 2, bar.Frequency.DAY)
+        with self.assertRaisesRegexp(Exception, "Duplicate bars"):
+            bar.Bars([b1, b2])
+
+    def testIter(self):
+        dt = datetime.datetime.now()
+        b1 = bar.BasicBar("a/USD", dt, 1, 1, 1, 1, 10, 1, bar.Frequency.DAY)
+        b2 = bar.BasicBar("a/EUR", dt, 2, 2, 2, 2, 10, 2, bar.Frequency.DAY)
+        b3 = bar.BasicBar("b/USD", dt, 2, 2, 2, 2, 10, 2, bar.Frequency.DAY)
+        bars = bar.Bars([b1, b2, b3])
+
+        items = [b1, b2, b3]
+        for item in bars:
+            items.remove(item)
+        assert len(items) == 0

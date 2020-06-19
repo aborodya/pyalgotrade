@@ -37,6 +37,9 @@ from pyalgotrade import dispatcher
 from pyalgotrade import resamplebase
 
 
+PRICE_CURRENCY = "USD"
+
+
 class IntraDayRange(common.TestCase):
     def __testMinuteRangeImpl(self, timezone=None):
         freq = bar.Frequency.MINUTE
@@ -164,13 +167,20 @@ class MonthRange(common.TestCase):
 class DataSeriesTestCase(common.TestCase):
 
     def testResample(self):
-        barDs = bards.BarDataSeries()
+        instrument = "ANY/USD"
+        barDs = bards.BarDataSeries(instrument)
         resampledDS = resampled_ds.ResampledDataSeries(barDs.getCloseDataSeries(), bar.Frequency.MINUTE, sum)
         resampledBarDS = resampled_ds.ResampledBarDataSeries(barDs, bar.Frequency.MINUTE)
 
-        barDs.append(bar.BasicBar(datetime.datetime(2011, 1, 1, 1, 1, 1), 2.1, 3, 1, 2, 10, 1, bar.Frequency.SECOND))
-        barDs.append(bar.BasicBar(datetime.datetime(2011, 1, 1, 1, 1, 2), 2, 3, 1, 2.3, 10, 2, bar.Frequency.SECOND))
-        barDs.append(bar.BasicBar(datetime.datetime(2011, 1, 1, 1, 2, 1), 2, 3, 1, 2, 10, 2, bar.Frequency.SECOND))
+        barDs.append(bar.BasicBar(
+            instrument, datetime.datetime(2011, 1, 1, 1, 1, 1), 2.1, 3, 1, 2, 10, 1, bar.Frequency.SECOND)
+        )
+        barDs.append(bar.BasicBar(
+            instrument, datetime.datetime(2011, 1, 1, 1, 1, 2), 2, 3, 1, 2.3, 10, 2, bar.Frequency.SECOND)
+        )
+        barDs.append(bar.BasicBar(
+            instrument, datetime.datetime(2011, 1, 1, 1, 2, 1), 2, 3, 1, 2, 10, 2, bar.Frequency.SECOND)
+        )
 
         self.assertEqual(len(resampledBarDS), 1)
         self.assertEqual(resampledBarDS[0].getDateTime(), datetime.datetime(2011, 1, 1, 1, 1))
@@ -196,11 +206,12 @@ class DataSeriesTestCase(common.TestCase):
         self.assertEqual(resampledDS[1], 2)
 
     def testCheckNow(self):
-        barDs = bards.BarDataSeries()
+        instrument = "ANY/USD"
+        barDs = bards.BarDataSeries(instrument)
         resampledBarDS = resampled_ds.ResampledBarDataSeries(barDs, bar.Frequency.MINUTE)
 
         barDateTime = datetime.datetime(2014, 7, 7, 22, 46, 28, 10000)
-        barDs.append(bar.BasicBar(barDateTime, 2.1, 3, 1, 2, 10, 1, bar.Frequency.MINUTE))
+        barDs.append(bar.BasicBar(instrument, barDateTime, 2.1, 3, 1, 2, 10, 1, bar.Frequency.MINUTE))
         self.assertEqual(len(resampledBarDS), 0)
 
         resampledBarDS.checkNow(barDateTime + datetime.timedelta(minutes=1))
@@ -217,53 +228,71 @@ class DataSeriesTestCase(common.TestCase):
 class CSVResampleTestCase(common.TestCase):
     def testResampleNinjaTraderHour(self):
         with common.TmpDir() as tmp_path:
+            instrument = "spy/ARS"
             # Resample.
             feed = ninjatraderfeed.Feed(ninjatraderfeed.Frequency.MINUTE)
-            feed.addBarsFromCSV("spy", common.get_data_file_path("nt-spy-minute-2011.csv"))
-            resampledBarDS = resampled_ds.ResampledBarDataSeries(feed["spy"], bar.Frequency.HOUR)
+            feed.addBarsFromCSV(instrument, common.get_data_file_path("nt-spy-minute-2011.csv"))
+            ds = feed.getDataSeries(instrument)
+            resampledBarDS = resampled_ds.ResampledBarDataSeries(ds, bar.Frequency.HOUR)
             resampledFile = os.path.join(tmp_path, "hour-nt-spy-minute-2011.csv")
             resample.resample_to_csv(feed, bar.Frequency.HOUR, resampledFile)
             resampledBarDS.pushLast()  # Need to manually push the last stot since time didn't change.
 
             # Load the resampled file.
             feed = csvfeed.GenericBarFeed(bar.Frequency.HOUR, marketsession.USEquities.getTimezone())
-            feed.addBarsFromCSV("spy", resampledFile)
+            feed.addBarsFromCSV(instrument, resampledFile)
             feed.loadAll()
+            ds = feed.getDataSeries(instrument)
 
-        self.assertEqual(len(feed["spy"]), 340)
-        self.assertEqual(feed["spy"][0].getDateTime(), dt.localize(datetime.datetime(2011, 1, 3, 9), marketsession.USEquities.getTimezone()))
-        self.assertEqual(feed["spy"][-1].getDateTime(), dt.localize(datetime.datetime(2011, 2, 1, 1), marketsession.USEquities.getTimezone()))
-        self.assertEqual(feed["spy"][0].getOpen(), 126.35)
-        self.assertEqual(feed["spy"][0].getHigh(), 126.45)
-        self.assertEqual(feed["spy"][0].getLow(), 126.3)
-        self.assertEqual(feed["spy"][0].getClose(), 126.4)
-        self.assertEqual(feed["spy"][0].getVolume(), 3397.0)
-        self.assertEqual(feed["spy"][0].getAdjClose(), None)
+        self.assertEqual(len(ds), 340)
+        self.assertEqual(
+            ds[0].getDateTime(),
+            dt.localize(datetime.datetime(2011, 1, 3, 9), marketsession.USEquities.getTimezone())
+        )
+        self.assertEqual(
+            ds[-1].getDateTime(),
+            dt.localize(datetime.datetime(2011, 2, 1, 1), marketsession.USEquities.getTimezone())
+        )
+        self.assertEqual(ds[0].getOpen(), 126.35)
+        self.assertEqual(ds[0].getHigh(), 126.45)
+        self.assertEqual(ds[0].getLow(), 126.3)
+        self.assertEqual(ds[0].getClose(), 126.4)
+        self.assertEqual(ds[0].getVolume(), 3397.0)
+        self.assertEqual(ds[0].getAdjClose(), None)
 
-        self.assertEqual(len(resampledBarDS), len(feed["spy"]))
+        self.assertEqual(len(resampledBarDS), len(ds))
         self.assertEqual(resampledBarDS[0].getDateTime(), dt.as_utc(datetime.datetime(2011, 1, 3, 9)))
         self.assertEqual(resampledBarDS[-1].getDateTime(), dt.as_utc(datetime.datetime(2011, 2, 1, 1)))
 
     def testResampleNinjaTraderDay(self):
         with common.TmpDir() as tmp_path:
+            instrument = "spy/USD"
             # Resample.
             feed = ninjatraderfeed.Feed(ninjatraderfeed.Frequency.MINUTE)
-            feed.addBarsFromCSV("spy", common.get_data_file_path("nt-spy-minute-2011.csv"))
-            resampledBarDS = resampled_ds.ResampledBarDataSeries(feed["spy"], bar.Frequency.DAY)
+            feed.addBarsFromCSV(instrument, common.get_data_file_path("nt-spy-minute-2011.csv"))
+            ds = feed.getDataSeries(instrument)
+            resampledBarDS = resampled_ds.ResampledBarDataSeries(ds, bar.Frequency.DAY)
             resampledFile = os.path.join(tmp_path, "day-nt-spy-minute-2011.csv")
             resample.resample_to_csv(feed, bar.Frequency.DAY, resampledFile)
             resampledBarDS.pushLast()  # Need to manually push the last stot since time didn't change.
 
             # Load the resampled file.
             feed = csvfeed.GenericBarFeed(bar.Frequency.DAY)
-            feed.addBarsFromCSV("spy", resampledFile, marketsession.USEquities.getTimezone())
+            feed.addBarsFromCSV(instrument, resampledFile, marketsession.USEquities.getTimezone())
             feed.loadAll()
+            ds = feed.getDataSeries(instrument)
 
-        self.assertEqual(len(feed["spy"]), 25)
-        self.assertEqual(feed["spy"][0].getDateTime(), dt.localize(datetime.datetime(2011, 1, 3), marketsession.USEquities.getTimezone()))
-        self.assertEqual(feed["spy"][-1].getDateTime(), dt.localize(datetime.datetime(2011, 2, 1), marketsession.USEquities.getTimezone()))
+        self.assertEqual(len(ds), 25)
+        self.assertEqual(
+            ds[0].getDateTime(),
+            dt.localize(datetime.datetime(2011, 1, 3), marketsession.USEquities.getTimezone())
+        )
+        self.assertEqual(
+            ds[-1].getDateTime(),
+            dt.localize(datetime.datetime(2011, 2, 1), marketsession.USEquities.getTimezone())
+        )
 
-        self.assertEqual(len(resampledBarDS), len(feed["spy"]))
+        self.assertEqual(len(resampledBarDS), len(ds))
         self.assertEqual(resampledBarDS[0].getDateTime(), dt.as_utc(datetime.datetime(2011, 1, 3)))
         self.assertEqual(resampledBarDS[-1].getDateTime(), dt.as_utc(datetime.datetime(2011, 2, 1)))
 
@@ -271,17 +300,19 @@ class CSVResampleTestCase(common.TestCase):
         with self.assertRaisesRegexp(Exception, "Only barfeeds with 1 instrument can be resampled"):
             with common.TmpDir() as tmp_path:
                 feed = ninjatraderfeed.Feed(ninjatraderfeed.Frequency.MINUTE)
-                feed.addBarsFromCSV("spy", common.get_data_file_path("nt-spy-minute-2011.csv"))
-                feed.addBarsFromCSV("spb", common.get_data_file_path("nt-spy-minute-2011.csv"))
+                feed.addBarsFromCSV("spy/USD", common.get_data_file_path("nt-spy-minute-2011.csv"))
+                feed.addBarsFromCSV("spb/USD", common.get_data_file_path("nt-spy-minute-2011.csv"))
                 resample.resample_to_csv(feed, bar.Frequency.HOUR, os.path.join(tmp_path, "any.csv"))
 
 
 class BarFeedTestCase(common.TestCase):
 
     def testResampledBarFeed(self):
+        instrument_1 = "spy/USD"
+        instrument_2 = "nikkei/USD"
         barFeed = yahoofeed.Feed()
-        barFeed.addBarsFromCSV("spy", common.get_data_file_path("spy-2010-yahoofinance.csv"))
-        barFeed.addBarsFromCSV("nikkei", common.get_data_file_path("nikkei-2010-yahoofinance.csv"))
+        barFeed.addBarsFromCSV(instrument_1, common.get_data_file_path("spy-2010-yahoofinance.csv"))
+        barFeed.addBarsFromCSV(instrument_2, common.get_data_file_path("nikkei-2010-yahoofinance.csv"))
         resampledBarFeed = resampled_bf.ResampledBarFeed(barFeed, bar.Frequency.MONTH)
 
         disp = dispatcher.Dispatcher()
@@ -289,8 +320,8 @@ class BarFeedTestCase(common.TestCase):
         disp.addSubject(resampledBarFeed)
         disp.run()
 
-        weeklySpyBarDS = resampledBarFeed["spy"]
-        weeklyNikkeiBarDS = resampledBarFeed["nikkei"]
+        weeklySpyBarDS = resampledBarFeed.getDataSeries(instrument_1)
+        weeklyNikkeiBarDS = resampledBarFeed.getDataSeries(instrument_2)
 
         # Check first bar
         self.assertEqual(weeklySpyBarDS[0].getDateTime().date(), datetime.date(2010, 1, 1))

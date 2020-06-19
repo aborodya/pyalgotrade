@@ -1,23 +1,26 @@
 from __future__ import print_function
 
 import sma_crossover
-from pyalgotrade import plotter
 from pyalgotrade.tools import quandl
 from pyalgotrade.stratanalyzer import sharpe
 
 
 def main(plot):
-    instrument = "AAPL"
+    symbol = "AAPL"
+    priceCurrency = "USD"
+    instrument = "%s/%s" % (symbol, priceCurrency)
     smaPeriod = 163
 
     # Download the bars.
-    feed = quandl.build_feed("WIKI", [instrument], 2011, 2012, ".")
+    feed = quandl.build_feed("WIKI", [symbol], priceCurrency, 2011, 2012, ".")
 
     strat = sma_crossover.SMACrossOver(feed, instrument, smaPeriod)
-    sharpeRatioAnalyzer = sharpe.SharpeRatio()
+    sharpeRatioAnalyzer = sharpe.SharpeRatio(priceCurrency)
     strat.attachAnalyzer(sharpeRatioAnalyzer)
 
     if plot:
+        from pyalgotrade import plotter
+
         plt = plotter.StrategyPlotter(strat, True, False, True)
         plt.getInstrumentSubplot(instrument).addDataSeries("sma", strat.getSMA())
 

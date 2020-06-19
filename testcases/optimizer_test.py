@@ -28,7 +28,7 @@ from pyalgotrade import strategy
 from pyalgotrade.barfeed import yahoofeed
 
 sys.path.append("samples")
-import sma_crossover
+import sma_crossover  # noqa: E402
 
 
 def parameters_generator(instrument, smaFirst, smaLast):
@@ -37,8 +37,8 @@ def parameters_generator(instrument, smaFirst, smaLast):
 
 
 class FailingStrategy(strategy.BacktestingStrategy):
-    def __init__(self, barFeed, instrument, smaPeriod):
-        super(FailingStrategy, self).__init__(barFeed)
+    def __init__(self, barFeed, instrument, priceCurrency, smaPeriod):
+        super(FailingStrategy, self).__init__(barFeed, balances={priceCurrency: 1e6})
 
     def onBars(self, bars):
         raise Exception("oh no!")
@@ -47,18 +47,20 @@ class FailingStrategy(strategy.BacktestingStrategy):
 class OptimizerTestCase(common.TestCase):
     def testLocal(self):
         barFeed = yahoofeed.Feed()
-        instrument = "orcl"
+        instrument = "orcl/USD"
         barFeed.addBarsFromCSV(instrument, common.get_data_file_path("orcl-2000-yahoofinance.csv"))
         res = local.run(
             sma_crossover.SMACrossOver, barFeed, parameters_generator(instrument, 5, 100),
             logLevel=logging.DEBUG, batchSize=50
         )
-        self.assertEquals(round(res.getResult(), 2), 1295462.6)
-        self.assertEquals(res.getParameters()[1], 20)
+        self.assertEqual(round(res.getResult(), 2), 1295462.6)
+        self.assertEqual(res.getParameters()[1], 20)
 
     def testFailingStrategy(self):
         barFeed = yahoofeed.Feed()
-        instrument = "orcl"
+        instrument = "orcl/USD"
         barFeed.addBarsFromCSV(instrument, common.get_data_file_path("orcl-2000-yahoofinance.csv"))
-        res = local.run(FailingStrategy, barFeed, parameters_generator(instrument, 5, 100), logLevel=logging.DEBUG)
+        res = local.run(
+            FailingStrategy, barFeed, parameters_generator(instrument, 5, 100), logLevel=logging.DEBUG
+        )
         self.assertIsNone(res)

@@ -206,8 +206,8 @@ class EMATestCase(common.TestCase):
 
     def testMaxRecursion(self):
         barFeed = ninjatraderfeed.Feed(bar.Frequency.MINUTE)
-        barFeed.addBarsFromCSV("any", common.get_data_file_path("nt-spy-minute-2011.csv"))
-        ema = ma.EMA(barFeed["any"].getPriceDataSeries(), 10)
+        barFeed.addBarsFromCSV("spy/USD", common.get_data_file_path("nt-spy-minute-2011.csv"))
+        ema = ma.EMA(barFeed["spy/USD"].getPriceDataSeries(), 10)
         # Load all the feed.
         barFeed.loadAll()
 
@@ -215,7 +215,11 @@ class EMATestCase(common.TestCase):
         self.assertEqual(round(ema[-1], 2), 128.81)
 
     def testBoundedFilter(self):
-        values = [22.2734, 22.1940, 22.0847, 22.1741, 22.1840, 22.1344, 22.2337, 22.4323, 22.2436, 22.2933, 22.1542, 22.3926, 22.3816, 22.6109, 23.3558, 24.0519, 23.7530, 23.8324, 23.9516, 23.6338, 23.8225, 23.8722, 23.6537, 23.1870, 23.0976, 23.3260, 22.6805, 23.0976, 22.4025, 22.1725]
+        values = [
+            22.2734, 22.1940, 22.0847, 22.1741, 22.1840, 22.1344, 22.2337, 22.4323, 22.2436, 22.2933, 22.1542,
+            22.3926, 22.3816, 22.6109, 23.3558, 24.0519, 23.7530, 23.8324, 23.9516, 23.6338, 23.8225, 23.8722,
+            23.6537, 23.1870, 23.0976, 23.3260, 22.6805, 23.0976, 22.4025, 22.1725
+        ]
 
         seqDS = dataseries.SequenceDataSeries()
         ema = ma.EMA(seqDS, 10, 2)

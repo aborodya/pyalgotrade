@@ -19,13 +19,62 @@
 """
 
 import pyalgotrade.logger
-from pyalgotrade import broker
+from pyalgotrade.instrument import build_instrument
 
 
 logger = pyalgotrade.logger.getLogger("bitstamp")
-btc_symbol = "BTC"
 
 
-class BTCTraits(broker.InstrumentTraits):
-    def roundQuantity(self, quantity):
-        return round(quantity, 8)
+SUPPORTED_INSTRUMENTS = {
+    build_instrument(pair) for pair in [
+        "BCH/BTC",
+        "BCH/EUR",
+        "BCH/USD",
+        "BTC/EUR",
+        "BTC/USD",
+        "ETH/BTC",
+        "ETH/EUR",
+        "ETH/USD",
+        "EUR/USD",
+        "LTC/BTC",
+        "LTC/EUR",
+        "LTC/USD",
+        "XRP/BTC",
+        "XRP/EUR",
+        "XRP/USD",
+    ]
+}
+
+
+SYMBOL_DIGITS = {
+    # Fiat currencies
+    "EUR": 2,
+    "USD": 2,
+    # Crypto currencies.
+    "BCH": 8,
+    "BTC": 8,
+    "ETH": 18,
+    "LTC": 8,
+    "XRP": 6,
+}
+
+
+MINIMUM_TRADE_AMOUNT = {
+    "BTC": 0.001,
+    "EUR": 25,
+    "USD": 25,
+}
+
+
+def instrument_to_channel(instrument):
+    assert instrument in SUPPORTED_INSTRUMENTS, "Unsupported currency pair %s" % instrument
+    return (instrument.symbol + instrument.priceCurrency).lower()
+
+
+def channel_to_instrument(channel):
+    assert len(channel) == 6
+    ret = "%s/%s" % (channel[0:3], channel[3:])
+    ret = ret.upper()
+    ret = build_instrument(ret)
+    assert ret in SUPPORTED_INSTRUMENTS, "Invalid channel %s" % channel
+    return ret

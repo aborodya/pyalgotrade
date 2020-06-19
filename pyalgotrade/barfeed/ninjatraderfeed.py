@@ -18,18 +18,20 @@
 .. moduleauthor:: Gabriel Martin Becedillas Ruiz <gabriel.becedillas@gmail.com>
 """
 
+
+import datetime
+
+import pytz
+
 import pyalgotrade.barfeed
 from pyalgotrade.barfeed import csvfeed
 from pyalgotrade import bar
 from pyalgotrade.utils import dt
-
-import pytz
-
-import datetime
+from pyalgotrade.instrument import build_instrument
 
 
 ######################################################################
-## NinjaTrader CSV parser
+# NinjaTrader CSV parser
 # Each bar must be on its own line and fields must be separated by semicolon (;).
 #
 # Minute Bars Format:
@@ -59,7 +61,8 @@ class Frequency(object):
 
 
 class RowParser(csvfeed.RowParser):
-    def __init__(self, frequency, dailyBarTime, timezone=None):
+    def __init__(self, instrument, frequency, dailyBarTime, timezone=None):
+        self.__instrument = build_instrument(instrument)
         self.__frequency = frequency
         self.__dailyBarTime = dailyBarTime
         self.__timezone = timezone
@@ -84,6 +87,9 @@ class RowParser(csvfeed.RowParser):
             ret = dt.localize(ret, self.__timezone)
         return ret
 
+    def getInstrument(self):
+        return self.__instrument
+
     def getFieldNames(self):
         return ["Date Time", "Open", "High", "Low", "Close", "Volume"]
 
@@ -97,14 +103,16 @@ class RowParser(csvfeed.RowParser):
         high = float(csvRowDict["High"])
         low = float(csvRowDict["Low"])
         volume = float(csvRowDict["Volume"])
-        return bar.BasicBar(dateTime, open_, high, low, close, volume, None, self.__frequency)
+        return bar.BasicBar(
+            self.__instrument, dateTime, open_, high, low, close, volume, None, self.__frequency
+        )
 
 
 class Feed(csvfeed.BarFeed):
     """A :class:`pyalgotrade.barfeed.csvfeed.BarFeed` that loads bars from CSV files exported from NinjaTrader.
 
-    :param frequency: The frequency of the bars. Only **pyalgotrade.bar.Frequency.MINUTE** or **pyalgotrade.bar.Frequency.DAY**
-        are supported.
+    :param frequency: The frequency of the bars. Only **pyalgotrade.bar.Frequency.MINUTE** or
+                      **pyalgotrade.bar.Frequency.DAY** are supported.
     :param timezone: The default timezone to use to localize bars. Check :mod:`pyalgotrade.marketsession`.
     :type timezone: A pytz timezone.
     :param maxLen: The maximum number of values that the :class:`pyalgotrade.dataseries.bards.BarDataSeries` will hold.
@@ -115,7 +123,9 @@ class Feed(csvfeed.BarFeed):
 
     def __init__(self, frequency, timezone=None, maxLen=None):
         if isinstance(timezone, int):
-            raise Exception("timezone as an int parameter is not supported anymore. Please use a pytz timezone instead.")
+            raise Exception(
+                "timezone as an int parameter is not supported anymore. Please use a pytz timezone instead."
+            )
 
         if frequency not in [bar.Frequency.MINUTE, bar.Frequency.DAY]:
             raise Exception("Invalid frequency.")
@@ -132,7 +142,8 @@ class Feed(csvfeed.BarFeed):
         The instrument gets registered in the bar feed.
 
         :param instrument: Instrument identifier.
-        :type instrument: string.
+        :type instrument: A :class:`pyalgotrade.instrument.Instrument` or a string formatted like
+            QUOTE_SYMBOL/PRICE_CURRENCY.
         :param path: The path to the file.
         :type path: string.
         :param timezone: The timezone to use to localize bars. Check :mod:`pyalgotrade.marketsession`.
@@ -140,10 +151,13 @@ class Feed(csvfeed.BarFeed):
         """
 
         if isinstance(timezone, int):
-            raise Exception("timezone as an int parameter is not supported anymore. Please use a pytz timezone instead.")
+            raise Exception(
+                "timezone as an int parameter is not supported anymore. Please use a pytz timezone instead."
+            )
 
         if timezone is None:
             timezone = self.__timezone
 
-        rowParser = RowParser(self.getFrequency(), self.getDailyBarTime(), timezone)
-        super(Feed, self).addBarsFromCSV(instrument, path, rowParser)
+        instrument = build_instrument(instrument)
+        rowParser = RowParser(instrument, self.getFrequency(), self.getDailyBarTime(), timezone)
+        super(Feed, self).addBarsFromCSV(path, rowParser)

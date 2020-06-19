@@ -1,26 +1,29 @@
 from __future__ import print_function
 
+import six
+
 from pyalgotrade import strategy
-from pyalgotrade import plotter
 from pyalgotrade.barfeed import yahoofeed
 from pyalgotrade.technical import ma
 from pyalgotrade.technical import cumret
 from pyalgotrade.stratanalyzer import sharpe
 from pyalgotrade.stratanalyzer import returns
+from pyalgotrade.broker import backtesting
 
 
 class MarketTiming(strategy.BacktestingStrategy):
-    def __init__(self, feed, instrumentsByClass, initialCash):
-        super(MarketTiming, self).__init__(feed, initialCash)
+    def __init__(self, feed, broker, instrumentsByClass, priceCurrency):
+        super(MarketTiming, self).__init__(feed, brk=broker)
         self.setUseAdjustedValues(True)
         self.__instrumentsByClass = instrumentsByClass
+        self.__priceCurrency = priceCurrency
         self.__rebalanceMonth = None
         self.__sharesToBuy = {}
         # Initialize indicators for each instrument.
         self.__sma = {}
         for assetClass in instrumentsByClass:
             for instrument in instrumentsByClass[assetClass]:
-                priceDS = feed[instrument].getPriceDataSeries()
+                priceDS = feed.getDataSeries(instrument).getPriceDataSeries()
                 self.__sma[instrument] = ma.SMA(priceDS, 200)
 
     def _shouldRebalance(self, dateTime):
@@ -37,7 +40,7 @@ class MarketTiming(strategy.BacktestingStrategy):
         # Rank based on 20 day returns.
         ret = None
         lookBack = 20
-        priceDS = self.getFeed()[instrument].getPriceDataSeries()
+        priceDS = self.getFeed().getDataSeries(instrument).getPriceDataSeries()
         if len(priceDS) >= lookBack and smas[-1] is not None and smas[-1*lookBack] is not None:
             ret = (priceDS[-1] - priceDS[-1*lookBack]) / float(priceDS[-1*lookBack])
         return ret
@@ -60,8 +63,8 @@ class MarketTiming(strategy.BacktestingStrategy):
         return ret
 
     def _placePendingOrders(self):
-        # Use less chash just in case price changes too much.
-        remainingCash = round(self.getBroker().getCash() * 0.9, 2)
+        # Use less cash just in case price changes too much.
+        remainingCash = round(self.getBroker().getBalance("USD") * 0.9, 2)
 
         for instrument in self.__sharesToBuy:
             orderSize = self.__sharesToBuy[instrument]
@@ -82,10 +85,9 @@ class MarketTiming(strategy.BacktestingStrategy):
                 self.__sharesToBuy[instrument] -= orderSize
 
     def _logPosSize(self):
-        totalEquity = self.getBroker().getEquity()
-        positions = self.getBroker().getPositions()
-        for instrument in self.getBroker().getPositions():
-            posSize = positions[instrument] * self.getLastPrice(instrument) / totalEquity * 100
+        totalEquity = self.getBroker().getEquity(self.__priceCurrency)
+        for instrument, balance in six.iteritems(self.getInstrumentBalances()):
+            posSize = balance * self.getLastPrice(instrument) / totalEquity * 100
             self.info("%s - %0.2f %%" % (instrument, posSize))
 
     def _rebalance(self):
@@ -95,7 +97,7 @@ class MarketTiming(strategy.BacktestingStrategy):
         for order in self.getBroker().getActiveOrders():
             self.getBroker().cancelOrder(order)
 
-        cashPerAssetClass = round(self.getBroker().getEquity() / float(len(self.__instrumentsByClass)), 2)
+        cashPerAssetClass = round(self.getBroker().getEquity(self.__priceCurrency) / float(len(self.__instrumentsByClass)), 2)
         self.__sharesToBuy = {}
 
         # Calculate which positions should be open during the next period.
@@ -104,18 +106,29 @@ class MarketTiming(strategy.BacktestingStrategy):
             instrument = topByClass[assetClass]
             self.info("Best for class %s: %s" % (assetClass, instrument))
             if instrument is not None:
+                symbol = instrument.split("/")[0]
                 lastPrice = self.getLastPrice(instrument)
-                cashForInstrument = round(cashPerAssetClass - self.getBroker().getShares(instrument) * lastPrice, 2)
+                cashForInstrument = round(
+                    cashPerAssetClass - self.getBroker().getBalance(symbol) * lastPrice,
+                    2
+                )
                 # This may yield a negative value and we have to reduce this
                 # position.
                 self.__sharesToBuy[instrument] = int(cashForInstrument / lastPrice)
 
         # Calculate which positions should be closed.
-        for instrument in self.getBroker().getPositions():
+        for instrument, balance in six.iteritems(self.getInstrumentBalances()):
             if instrument not in topByClass.values():
-                currentShares = self.getBroker().getShares(instrument)
+                currentShares = balance
                 assert(instrument not in self.__sharesToBuy)
                 self.__sharesToBuy[instrument] = currentShares * -1
+
+    def getInstrumentBalances(self):
+        return {
+            "%s/%s" % (symbol, self.__priceCurrency): balance \
+            for symbol, balance in six.iteritems(self.getBroker().getBalances())
+            if symbol != self.__priceCurrency
+        }
 
     def getSMA(self, instrument):
         return self.__sma[instrument]
@@ -131,37 +144,40 @@ class MarketTiming(strategy.BacktestingStrategy):
 
 
 def main(plot):
-    initialCash = 10000
+    priceCurrency = "USD"
     instrumentsByClass = {
-        "US Stocks": ["VTI"],
-        "Foreign Stocks": ["VEU"],
-        "US 10 Year Government Bonds": ["IEF"],
-        "Real Estate": ["VNQ"],
-        "Commodities": ["DBC"],
+        "US Stocks": ["VTI/USD"],
+        "Foreign Stocks": ["VEU/USD"],
+        "US 10 Year Government Bonds": ["IEF/USD"],
+        "Real Estate": ["VNQ/USD"],
+        "Commodities": ["DBC/USD"],
     }
 
     # Load the bars. These files were manually downloaded from Yahoo Finance.
     feed = yahoofeed.Feed()
-    instruments = ["SPY"]
-    for assetClass in instrumentsByClass:
-        instruments.extend(instrumentsByClass[assetClass])
+    instruments = ["SPY/USD"] + sum(instrumentsByClass.values(), [])
 
     for year in range(2007, 2013+1):
         for instrument in instruments:
-            fileName = "%s-%d-yahoofinance.csv" % (instrument, year)
+            symbol = instrument.split("/")[0]
+            fileName = "%s-%d-yahoofinance.csv" % (symbol, year)
             print("Loading bars from %s" % fileName)
             feed.addBarsFromCSV(instrument, fileName)
 
+    broker = backtesting.Broker({priceCurrency: 10000}, feed)
+
     # Build the strategy and attach some metrics.
-    strat = MarketTiming(feed, instrumentsByClass, initialCash)
-    sharpeRatioAnalyzer = sharpe.SharpeRatio()
+    strat = MarketTiming(feed, broker, instrumentsByClass, priceCurrency)
+    sharpeRatioAnalyzer = sharpe.SharpeRatio(priceCurrency)
     strat.attachAnalyzer(sharpeRatioAnalyzer)
-    returnsAnalyzer = returns.Returns()
+    returnsAnalyzer = returns.Returns(priceCurrency)
     strat.attachAnalyzer(returnsAnalyzer)
 
     if plot:
+        from pyalgotrade import plotter
+
         plt = plotter.StrategyPlotter(strat, False, False, True)
-        plt.getOrCreateSubplot("cash").addCallback("Cash", lambda x: strat.getBroker().getCash())
+        plt.getOrCreateSubplot("cash").addCallback("Cash", lambda x: strat.getBroker().getBalance("USD"))
         # Plot strategy vs. SPY cumulative returns.
         plt.getOrCreateSubplot("returns").addDataSeries("SPY", cumret.CumulativeReturn(feed["SPY"].getPriceDataSeries()))
         plt.getOrCreateSubplot("returns").addDataSeries("Strategy", returnsAnalyzer.getCumulativeReturns())

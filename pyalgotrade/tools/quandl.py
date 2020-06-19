@@ -29,16 +29,18 @@ from pyalgotrade.barfeed import quandlfeed
 from pyalgotrade.utils import dt
 from pyalgotrade.utils import csvutils
 import pyalgotrade.logger
+from pyalgotrade.instrument import Instrument
 
 
 # http://www.quandl.com/help/api
 
 def download_csv(sourceCode, tableCode, begin, end, frequency, authToken):
-    url = "http://www.quandl.com/api/v1/datasets/%s/%s.csv" % (sourceCode, tableCode)
+    url = "http://www.quandl.com/api/v3/datasets/%s/%s.csv" % (sourceCode, tableCode)
     params = {
-        "trim_start": begin.strftime("%Y-%m-%d"),
-        "trim_end": end.strftime("%Y-%m-%d"),
-        "collapse": frequency
+        "start_date": begin.strftime("%Y-%m-%d"),
+        "end_date": end.strftime("%Y-%m-%d"),
+        "collapse": frequency,
+        "order": "asc",
     }
     if authToken is not None:
         params["auth_token"] = authToken
@@ -61,7 +63,9 @@ def download_daily_bars(sourceCode, tableCode, year, csvFile, authToken=None):
     :type authToken: string.
     """
 
-    bars = download_csv(sourceCode, tableCode, datetime.date(year, 1, 1), datetime.date(year, 12, 31), "daily", authToken)
+    bars = download_csv(
+        sourceCode, tableCode, datetime.date(year, 1, 1), datetime.date(year, 12, 31), "daily", authToken
+    )
     f = open(csvFile, "w")
     f.write(bars)
     f.close()
@@ -90,25 +94,29 @@ def download_weekly_bars(sourceCode, tableCode, year, csvFile, authToken=None):
     f.close()
 
 
-def build_feed(sourceCode, tableCodes, fromYear, toYear, storage, frequency=bar.Frequency.DAY, timezone=None,
-               skipErrors=False, authToken=None, columnNames={}, forceDownload=False,
-               skipMalformedBars=False
-               ):
+def build_feed(
+        sourceCode, tableCodes, priceCurrency, fromYear, toYear, storage, frequency=bar.Frequency.DAY, timezone=None,
+        skipErrors=False, authToken=None, columnNames={}, forceDownload=False,
+        skipMalformedBars=False
+):
     """Build and load a :class:`pyalgotrade.barfeed.quandlfeed.Feed` using CSV files downloaded from Quandl.
     CSV files are downloaded if they haven't been downloaded before.
 
     :param sourceCode: The dataset source code.
     :type sourceCode: string.
     :param tableCodes: The dataset table codes.
-    :type tableCodes: list.
+        A list of strings or a dictionary that maps a table code to a symbol for the instrument.
+    :type tableCodes: list/dict.
+    :param priceCurrency: The price currency.
+    :type priceCurrency: string.
     :param fromYear: The first year.
     :type fromYear: int.
     :param toYear: The last year.
     :type toYear: int.
     :param storage: The path were the files will be loaded from, or downloaded to.
     :type storage: string.
-    :param frequency: The frequency of the bars. Only **pyalgotrade.bar.Frequency.DAY** or **pyalgotrade.bar.Frequency.WEEK**
-        are supported.
+    :param frequency: The frequency of the bars. Only **pyalgotrade.bar.Frequency.DAY** or
+                      **pyalgotrade.bar.Frequency.WEEK** are supported.
     :param timezone: The default timezone to use to localize bars. Check :mod:`pyalgotrade.marketsession`.
     :type timezone: A pytz timezone.
     :param skipErrors: True to keep on loading/downloading files in case of errors.
@@ -160,22 +168,35 @@ def build_feed(sourceCode, tableCodes, fromYear, toYear, storage, frequency=bar.
                         continue
                     else:
                         raise e
-            ret.addBarsFromCSV(tableCode, fileName, skipMalformedBars=skipMalformedBars)
+            if isinstance(tableCodes, dict):
+                instrument = Instrument(tableCodes[tableCode], priceCurrency)
+            else:
+                instrument = Instrument(tableCode, priceCurrency)
+            ret.addBarsFromCSV(instrument, fileName, skipMalformedBars=skipMalformedBars)
     return ret
 
 
 def main():
     parser = argparse.ArgumentParser(description="Quandl utility")
 
-    parser.add_argument("--auth-token", required=False, help="An authentication token needed if you're doing more than 50 calls per day")
+    parser.add_argument(
+        "--auth-token", required=False,
+        help="An authentication token needed if you're doing more than 50 calls per day"
+    )
     parser.add_argument("--source-code", required=True, help="The dataset source code")
     parser.add_argument("--table-code", required=True, help="The dataset table code")
     parser.add_argument("--from-year", required=True, type=int, help="The first year to download")
     parser.add_argument("--to-year", required=True, type=int, help="The last year to download")
     parser.add_argument("--storage", required=True, help="The path were the files will be downloaded to")
     parser.add_argument("--force-download", action='store_true', help="Force downloading even if the files exist")
-    parser.add_argument("--ignore-errors", action='store_true', help="True to keep on downloading files in case of errors")
-    parser.add_argument("--frequency", default="daily", choices=["daily", "weekly"], help="The frequency of the bars. Only daily or weekly are supported")
+    parser.add_argument(
+        "--ignore-errors", action='store_true',
+        help="True to keep on downloading files in case of errors"
+    )
+    parser.add_argument(
+        "--frequency", default="daily", choices=["daily", "weekly"],
+        help="The frequency of the bars. Only daily or weekly are supported"
+    )
 
     args = parser.parse_args()
 

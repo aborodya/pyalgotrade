@@ -1,20 +1,22 @@
-# ARG PYALGOTRADE_TAG
-# FROM gbecedillas/pyalgotrade:${PYALGOTRADE_TAG}
-FROM gbecedillas/pyalgotrade:0.20-py27
+FROM gbecedillas/pyalgotrade:0.20-py37
 
 MAINTAINER Gabriel Martin Becedillas Ruiz <gabriel.becedillas@gmail.com>
 
 RUN apt-get update
 
-RUN pip install tox
-# Required by matplotlib
-RUN apt-get install -y python-tk 
+# Remove the installed version of PyAlgoTrade since we'll be executing testcases from source.
+RUN pip uninstall -y pyalgotrade
 
+# For testcases
+RUN pip install tox
+RUN pip install flake8
+
+# List installed packages
 RUN pip freeze
 
-RUN mkdir /tmp/pyalgotrade
-
 # Files needed to execute testcases.
+RUN mkdir /tmp/pyalgotrade
+COPY Makefile /tmp/pyalgotrade/
 COPY setup.py /tmp/pyalgotrade/
 COPY travis/run_tests.sh /tmp/pyalgotrade/
 COPY coverage.cfg /tmp/pyalgotrade/
@@ -23,5 +25,3 @@ COPY pyalgotrade /tmp/pyalgotrade/pyalgotrade
 COPY testcases /tmp/pyalgotrade/testcases
 COPY samples /tmp/pyalgotrade/samples
 
-# Remove the installed version of PyAlgoTrade since we'll be executing testcases from source.
-RUN pip uninstall -y pyalgotrade

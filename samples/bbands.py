@@ -1,30 +1,28 @@
 from __future__ import print_function
 
 from pyalgotrade import strategy
-from pyalgotrade import plotter
 from pyalgotrade.tools import quandl
 from pyalgotrade.technical import bollinger
 from pyalgotrade.stratanalyzer import sharpe
-from pyalgotrade import broker as basebroker
+from pyalgotrade.broker import backtesting
 
 
 class BBands(strategy.BacktestingStrategy):
-    def __init__(self, feed, instrument, bBandsPeriod):
-        super(BBands, self).__init__(feed)
+    def __init__(self, feed, broker, instrument, bBandsPeriod):
+        super(BBands, self).__init__(feed, brk=broker)
         self.__instrument = instrument
-        self.__bbands = bollinger.BollingerBands(feed[instrument].getCloseDataSeries(), bBandsPeriod, 2)
+        self.__symbol, self.__priceCurrency = instrument.split("/")
+
+        self.__bbands = bollinger.BollingerBands(
+            feed.getDataSeries(instrument).getCloseDataSeries(),
+            bBandsPeriod, 2
+        )
 
     def getBollingerBands(self):
         return self.__bbands
 
-    def onOrderUpdated(self, order):
-        if order.isBuy():
-            orderType = "Buy"
-        else:
-            orderType = "Sell"
-        self.info("%s order %d updated - Status: %s" % (
-            orderType, order.getId(), basebroker.Order.State.toString(order.getState())
-        ))
+    def onOrderUpdated(self, orderEvent):
+        self.info(str(orderEvent))
 
     def onBars(self, bars):
         lower = self.__bbands.getLowerBand()[-1]
@@ -32,10 +30,10 @@ class BBands(strategy.BacktestingStrategy):
         if lower is None:
             return
 
-        shares = self.getBroker().getShares(self.__instrument)
-        bar = bars[self.__instrument]
+        shares = self.getBroker().getBalance(self.__symbol)
+        bar = bars.getBar(self.__instrument)
         if shares == 0 and bar.getClose() < lower:
-            sharesToBuy = int(self.getBroker().getCash(False) / bar.getClose())
+            sharesToBuy = self.getBroker().getBalance(self.__priceCurrency) // bar.getClose()
             self.info("Placing buy market order for %s shares" % sharesToBuy)
             self.marketOrder(self.__instrument, sharesToBuy)
         elif shares > 0 and bar.getClose() > upper:
@@ -44,17 +42,22 @@ class BBands(strategy.BacktestingStrategy):
 
 
 def main(plot):
-    instrument = "yhoo"
+    symbol = "yhoo"
+    priceCurrency = "USD"
+    instrument = "%s/%s" % (symbol, priceCurrency)
     bBandsPeriod = 40
 
     # Download the bars.
-    feed = quandl.build_feed("WIKI", [instrument], 2011, 2012, ".")
+    feed = quandl.build_feed("WIKI", [symbol], priceCurrency, 2011, 2012, ".")
+    broker = backtesting.Broker({priceCurrency: 1000000}, feed)
 
-    strat = BBands(feed, instrument, bBandsPeriod)
-    sharpeRatioAnalyzer = sharpe.SharpeRatio()
+    strat = BBands(feed, broker, instrument, bBandsPeriod)
+    sharpeRatioAnalyzer = sharpe.SharpeRatio(priceCurrency)
     strat.attachAnalyzer(sharpeRatioAnalyzer)
 
     if plot:
+        from pyalgotrade import plotter
+
         plt = plotter.StrategyPlotter(strat, True, True, True)
         plt.getInstrumentSubplot(instrument).addDataSeries("upper", strat.getBollingerBands().getUpperBand())
         plt.getInstrumentSubplot(instrument).addDataSeries("middle", strat.getBollingerBands().getMiddleBand())

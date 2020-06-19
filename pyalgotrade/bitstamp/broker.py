@@ -23,6 +23,7 @@ from pyalgotrade import broker
 from pyalgotrade.broker import backtesting
 from pyalgotrade.bitstamp import common
 from pyalgotrade.bitstamp import livebroker
+from pyalgotrade.instrument import build_instrument
 
 
 LiveBroker = livebroker.LiveBroker
@@ -33,34 +34,97 @@ LiveBroker = livebroker.LiveBroker
 # strategy.
 
 
+class TradeValidatorPredicate(object):
+    def __init__(self, instrumentTraits):
+        self._instrumentTraits = instrumentTraits
+
+    def isValidTrade(self, action, instrument, limitPrice, quantity):
+        # https://www.bitstamp.net/fee-schedule/
+        # The minimum order size is 25.00 USD/EUR for USD/EUR-denominated trading pairs,
+        # and 0.001 BTC for BTC-denominated trading pairs.
+
+        if instrument not in common.SUPPORTED_INSTRUMENTS:
+            return False, "Unsupported pair %s" % instrument
+
+        # Check the instrument amount.
+        minimum = common.MINIMUM_TRADE_AMOUNT.get(instrument.symbol, 0)
+        if quantity < minimum:
+            return False, "%s amount must be >= %s" % (instrument, minimum)
+
+        # Check the price currency amount.
+        minimum = common.MINIMUM_TRADE_AMOUNT.get(instrument.priceCurrency, 0)
+        if limitPrice and limitPrice * quantity < minimum:
+            return False, "%s amount must be >= %s" % (instrument.priceCurrency, minimum)
+
+        return True, None
+
+
 class BacktestingBroker(backtesting.Broker):
-    MIN_TRADE_USD = 5
+    """
+    A Bitstamp backtesting broker.
 
-    """A Bitstamp backtesting broker.
-
-    :param cash: The initial amount of cash.
-    :type cash: int/float.
+    :param initialBalances: A dictionary that maps an instrument/currency/etc to the account's starting balance.
+    :type initialBalances: dict.
     :param barFeed: The bar feed that will provide the bars.
     :type barFeed: :class:`pyalgotrade.barfeed.BarFeed`
-    :param fee: The fee percentage for each order. Defaults to 0.25%.
+    :param fee: The fee percentage for each order. Defaults to 0.5%.
     :type fee: float.
+    :param instrumentTraits: Instrument traits.
+    :type instrumentTraits: :class:`pyalgotrade.broker.InstrumentTraits`
 
     .. note::
         * Only limit orders are supported.
-        * Orders are automatically set as **goodTillCanceled=True** and  **allOrNone=False**.
+        * Orders are automatically set as **goodTillCanceled=True** and **allOrNone=False**.
         * BUY_TO_COVER orders are mapped to BUY orders.
         * SELL_SHORT orders are mapped to SELL orders.
     """
 
-    def __init__(self, cash, barFeed, fee=0.0025):
-        commission = backtesting.TradePercentage(fee)
-        super(BacktestingBroker, self).__init__(cash, barFeed, commission)
+    def __init__(self, initialBalances, barFeed, fee=0.005, instrumentTraits=livebroker.InstrumentTraits()):
+        super(BacktestingBroker, self).__init__(
+            initialBalances, barFeed, commission=backtesting.TradePercentage(fee), instrumentTraits=instrumentTraits
+        )
+        self._tradeValidatorPredicate = TradeValidatorPredicate(instrumentTraits)
 
-    def getInstrumentTraits(self, instrument):
-        return common.BTCTraits()
+    def _getPriceForInstrument(self, instrument):
+        assert instrument in common.SUPPORTED_INSTRUMENTS, "Unsupported instrument %s" % instrument
+        return super(BacktestingBroker, self)._getPriceForInstrument(instrument)
+
+    def _preSubmitCheck(self, order):
+        assert order.getType() == broker.Order.Type.LIMIT
+
+        action = order.getAction()
+        quantity = order.getQuantity()
+
+        if action == broker.Order.Action.BUY:
+            limitPrice = order.getLimitPrice()
+            priceCurrency = order.getInstrument().priceCurrency
+
+            # Check that there is enough cash.
+            fee = self.getCommission().calculate(order, limitPrice, quantity)
+            required = self.getInstrumentTraits().round(limitPrice * quantity + fee, priceCurrency)
+            available = self.getBalance(priceCurrency)
+            if required > available:
+                raise Exception("Not enough %s. %s required. %s available" % (
+                    priceCurrency, required, available
+                ))
+        elif action == broker.Order.Action.SELL:
+            instrument = order.getInstrument()
+            available = self.getBalance(instrument.symbol)
+
+            # Check that there are enough coins.
+            if quantity > available:
+                raise Exception("Not enough %s. %s required. %s available" % (
+                    instrument.symbol, quantity, available
+                ))
+        else:
+            raise Exception("Only BUY/SELL orders are supported")
+
+    def setTradeValidatorPredicate(self, predicate):
+        self._tradeValidatorPredicate = predicate
 
     def submitOrder(self, order):
         if order.isInitial():
+            self._preSubmitCheck(order)
             # Override user settings based on Bitstamp limitations.
             order.setAllOrNone(False)
             order.setGoodTillCanceled(True)
@@ -70,29 +134,18 @@ class BacktestingBroker(backtesting.Broker):
         raise Exception("Market orders are not supported")
 
     def createLimitOrder(self, action, instrument, limitPrice, quantity):
-        if instrument != common.btc_symbol:
-            raise Exception("Only BTC instrument is supported")
+        instrument = build_instrument(instrument)
 
         if action == broker.Order.Action.BUY_TO_COVER:
             action = broker.Order.Action.BUY
         elif action == broker.Order.Action.SELL_SHORT:
             action = broker.Order.Action.SELL
 
-        if limitPrice * quantity < BacktestingBroker.MIN_TRADE_USD:
-            raise Exception("Trade must be >= %s" % (BacktestingBroker.MIN_TRADE_USD))
-
-        if action == broker.Order.Action.BUY:
-            # Check that there is enough cash.
-            fee = self.getCommission().calculate(None, limitPrice, quantity)
-            cashRequired = limitPrice * quantity + fee
-            if cashRequired > self.getCash(False):
-                raise Exception("Not enough cash")
-        elif action == broker.Order.Action.SELL:
-            # Check that there are enough coins.
-            if quantity > self.getShares(common.btc_symbol):
-                raise Exception("Not enough %s" % (common.btc_symbol))
-        else:
-            raise Exception("Only BUY/SELL orders are supported")
+        validTrade, reason = self._tradeValidatorPredicate.isValidTrade(
+            action, instrument, limitPrice, quantity
+        )
+        if not validTrade:
+            raise Exception("Invalid trade: %s" % reason)
 
         return super(BacktestingBroker, self).createLimitOrder(action, instrument, limitPrice, quantity)
 
@@ -104,20 +157,6 @@ class BacktestingBroker(backtesting.Broker):
 
 
 class PaperTradingBroker(BacktestingBroker):
-    """A Bitstamp paper trading broker.
-
-    :param cash: The initial amount of cash.
-    :type cash: int/float.
-    :param barFeed: The bar feed that will provide the bars.
-    :type barFeed: :class:`pyalgotrade.barfeed.BarFeed`
-    :param fee: The fee percentage for each order. Defaults to 0.5%.
-    :type fee: float.
-
-    .. note::
-        * Only limit orders are supported.
-        * Orders are automatically set as **goodTillCanceled=True** and  **allOrNone=False**.
-        * BUY_TO_COVER orders are mapped to BUY orders.
-        * SELL_SHORT orders are mapped to SELL orders.
-    """
+    """A Bitstamp paper trading broker."""
 
     pass

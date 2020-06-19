@@ -23,6 +23,7 @@ import six
 from pyalgotrade import barfeed
 from pyalgotrade import bar
 from pyalgotrade import utils
+from pyalgotrade.instrument import build_instrument
 
 
 # A non real-time BarFeed responsible for:
@@ -41,16 +42,7 @@ class BarFeed(barfeed.BaseBarFeed):
         self.__started = False
         self.__currDateTime = None
 
-    def reset(self):
-        self.__nextPos = {}
-        for instrument in self.__bars.keys():
-            self.__nextPos.setdefault(instrument, 0)
-        self.__currDateTime = None
-        super(BarFeed, self).reset()
-
-    def getCurrentDateTime(self):
-        return self.__currDateTime
-
+    # BEGIN observer.Subject abstractmethods
     def start(self):
         super(BarFeed, self).start()
         self.__started = True
@@ -60,19 +52,6 @@ class BarFeed(barfeed.BaseBarFeed):
 
     def join(self):
         pass
-
-    def addBarsFromSequence(self, instrument, bars):
-        if self.__started:
-            raise Exception("Can't add more bars once you started consuming bars")
-
-        self.__bars.setdefault(instrument, [])
-        self.__nextPos.setdefault(instrument, 0)
-
-        # Add and sort the bars
-        self.__bars[instrument].extend(bars)
-        self.__bars[instrument].sort(key=lambda b: b.getDateTime())
-
-        self.registerInstrument(instrument)
 
     def eof(self):
         ret = True
@@ -92,6 +71,11 @@ class BarFeed(barfeed.BaseBarFeed):
             if nextPos < len(bars):
                 ret = utils.safe_min(ret, bars[nextPos].getDateTime())
         return ret
+    # END observer.Subject abstractmethods
+
+    # BEGIN barfeed.BaseBarFeed abstractmethods
+    def getCurrentDateTime(self):
+        return self.__currDateTime
 
     def getNextBars(self):
         # All bars must have the same datetime. We will return all the ones with the smallest datetime.
@@ -100,19 +84,43 @@ class BarFeed(barfeed.BaseBarFeed):
         if smallestDateTime is None:
             return None
 
-        # Make a second pass to get all the bars that had the smallest datetime.
-        ret = {}
+        # Make a second pass to get all the bars that have the smallest datetime.
+        ret = []
         for instrument, bars in six.iteritems(self.__bars):
             nextPos = self.__nextPos[instrument]
             if nextPos < len(bars) and bars[nextPos].getDateTime() == smallestDateTime:
-                ret[instrument] = bars[nextPos]
+                # Check if there are duplicate bars (with the same datetime).
+                if self.__currDateTime == smallestDateTime:
+                    raise Exception("Duplicate bars found for %s on %s" % (instrument, smallestDateTime))
+                assert bars[nextPos].getInstrument() == instrument, \
+                    "%s != %s" % (bars[nextPos].getInstrument(), instrument)
+                ret.append(bars[nextPos])
                 self.__nextPos[instrument] += 1
-
-        if self.__currDateTime == smallestDateTime:
-            raise Exception("Duplicate bars found for %s on %s" % (list(ret.keys()), smallestDateTime))
 
         self.__currDateTime = smallestDateTime
         return bar.Bars(ret)
+    # END barfeed.BaseBarFeed abstractmethods
+
+    def reset(self):
+        self.__nextPos = {}
+        for instrument in self.__bars.keys():
+            self.__nextPos.setdefault(instrument, 0)
+        self.__currDateTime = None
+        super(BarFeed, self).reset()
+
+    def addBarsFromSequence(self, instrument, bars):
+        if self.__started:
+            raise Exception("Can't add more bars once you started consuming bars")
+
+        instrument = build_instrument(instrument)
+        self.__bars.setdefault(instrument, [])
+        self.__nextPos.setdefault(instrument, 0)
+
+        # Add and sort the bars
+        self.__bars[instrument].extend(bars)
+        self.__bars[instrument].sort(key=lambda b: b.getDateTime())
+
+        self.registerDataSeries(instrument)
 
     def loadAll(self):
         for dateTime, bars in self:
